@@ -36,8 +36,10 @@ A modern web interface for downloading Spotify songs, playlists, albums, and art
    This will:
    - Check Python installation
    - Install all required libraries from requirements.txt
-   - Set Spotify credentials (edit run.bat to use your own)
+   - Set Spotify credentials (from .env or prompt)
    - Start the FastAPI server
+
+**Always use run.bat to start the app on Windows for easiest setup.**
 
 ### Mac/Linux
 
@@ -52,8 +54,10 @@ A modern web interface for downloading Spotify songs, playlists, albums, and art
    This will:
    - Check Python installation
    - Install all required libraries from requirements.txt
-   - Set Spotify credentials (edit run.sh to use your own)
+   - Set Spotify credentials (from .env or prompt)
    - Start the FastAPI server
+
+**Always use run.sh to start the app on Mac/Linux for easiest setup.**
 
 ### Manual Setup (All Platforms)
 
