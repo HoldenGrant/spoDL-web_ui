@@ -13,9 +13,24 @@ if %errorlevel% neq 0 (
 )
 
 
-echo Installing required Python libraries...
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+echo Checking required Python libraries...
+python -m pip freeze > pip-freeze-tmp.txt
+findstr /i /c:"fastapi==" pip-freeze-tmp.txt >nul 2>&1
+if %errorlevel% neq 0 set NEEDS_INSTALL=1
+findstr /i /c:"uvicorn==" pip-freeze-tmp.txt >nul 2>&1
+if %errorlevel% neq 0 set NEEDS_INSTALL=1
+findstr /i /c:"spotdl==" pip-freeze-tmp.txt >nul 2>&1
+if %errorlevel% neq 0 set NEEDS_INSTALL=1
+findstr /i /c:"python-multipart==" pip-freeze-tmp.txt >nul 2>&1
+if %errorlevel% neq 0 set NEEDS_INSTALL=1
+del pip-freeze-tmp.txt
+if defined NEEDS_INSTALL (
+    echo Installing required Python libraries...
+    python -m pip install --upgrade pip
+    python -m pip install -r requirements.txt
+) else (
+    echo All required Python libraries are already installed.
+)
 
 echo Setting Spotify credentials...
 if exist .env (
