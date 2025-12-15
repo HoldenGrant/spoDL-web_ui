@@ -293,11 +293,18 @@
             border-radius: 6px;
             font-weight: 600;
             font-size: 0.95rem;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.2s;
+        }
+        .folder-header.open {
+            background: #e0e0e0;
         }
 
         .download-item.folder-item {
             margin-left: 20px;
             background: #fafafa;
+            display: none;
         }
 
         .empty-state {
@@ -482,6 +489,7 @@
             <div class="download-status-loader">
                 <div class="loader-spinner"></div>
                 <div class="loader-text" id="progressText">Downloading in progress...</div>
+                <div class="loader-timer" id="countdownTimer" style="margin-left:16px;color:#1DB954;font-weight:600;"></div>
             </div>
         </div>
 
@@ -559,7 +567,13 @@
             }
         });
 
+        let downloadStartTime = null;
+        let lastSongsCompleted = 0;
+        let lastUpdateTime = null;
         function pollDownloadStatus() {
+            downloadStartTime = Date.now();
+            lastSongsCompleted = 0;
+            lastUpdateTime = Date.now();
             pollInterval = setInterval(async () => {
                 try {
                     const response = await fetch(`${API_BASE}/status`);
@@ -567,17 +581,39 @@
 
                     if (status.current) {
                         const total = status.current.total || 0;
-                        
+                        const completed = status.current.songs_completed || 0;
                         // Update badge with song count while processing
                         if (status.current.status === 'processing' && total > 0) {
                             document.getElementById('statusBadge').textContent = `Processing: ${total} songs`;
                         }
-                        
+
+                        // Countdown logic
+                        if (status.current.status === 'processing' && total > 1) {
+                            if (completed > 0) {
+                                const now = Date.now();
+                                // Only update average if new song completed
+                                if (completed !== lastSongsCompleted) {
+                                    lastUpdateTime = now;
+                                    lastSongsCompleted = completed;
+                                }
+                                const elapsed = (now - downloadStartTime) / 1000; // seconds
+                                const avgPerSong = elapsed / completed;
+                                const remaining = total - completed;
+                                const estSeconds = Math.round(avgPerSong * remaining);
+                                document.getElementById('countdownTimer').textContent = `Estimated time left: ${formatTime(estSeconds)}`;
+                            } else {
+                                document.getElementById('countdownTimer').textContent = 'Estimating time left...';
+                            }
+                        } else {
+                            document.getElementById('countdownTimer').textContent = '';
+                        }
+
                         if (status.current.status === 'completed') {
                             clearInterval(pollInterval);
                             document.getElementById('progressText').textContent = 'Download complete';
                             document.getElementById('statusBadge').textContent = 'Completed';
                             document.getElementById('statusBadge').className = 'status-badge badge-completed';
+                            document.getElementById('countdownTimer').textContent = '';
                             showSuccess('Download completed!');
                             await loadDownloads();
                             setTimeout(() => {
@@ -586,6 +622,7 @@
                         } else if (status.current.status === 'failed') {
                             clearInterval(pollInterval);
                             showError('Download failed: ' + (status.current.error || 'Unknown error'));
+                            document.getElementById('countdownTimer').textContent = '';
                             resetDownloadState();
                         }
                     }
@@ -593,6 +630,12 @@
                     console.error('Error polling status:', error);
                 }
             }, 1000);
+        }
+        function formatTime(seconds) {
+            if (isNaN(seconds) || !isFinite(seconds) || seconds < 0) return '';
+            const m = Math.floor(seconds / 60);
+            const s = seconds % 60;
+            return m > 0 ? `${m}:${s.toString().padStart(2, '0')} left` : `${s}s left`;
         }
 
         function showError(message) {
@@ -666,10 +709,11 @@
                             });
                         } else {
                             // Folder with songs
-                            html += `<li class="folder-header">📁 ${escapeHtml(folder)} (${files.length} songs)</li>`;
+                            const folderId = `folder-${folder.replace(/[^a-zA-Z0-9_-]/g, '')}-${Math.random().toString(36).substr(2, 5)}`;
+                            html += `<li class="folder-header" data-folder="${folderId}">📁 ${escapeHtml(folder)} (${files.length} songs)</li>`;
                             files.forEach(file => {
                                 html += `
-                                    <li class="download-item folder-item">
+                                    <li class="download-item folder-item" data-folder-item="${folderId}">
                                         <div class="download-info">
                                             <div class="download-name">🎵 ${escapeHtml(file.filename)}</div>
                                             <div class="download-meta">${formatDate(file.date)}</div>
@@ -682,6 +726,16 @@
                     });
                     
                     downloadsList.innerHTML = html;
+                    // Accordion logic
+                    document.querySelectorAll('.folder-header').forEach(header => {
+                        header.addEventListener('click', function() {
+                            const folderId = this.getAttribute('data-folder');
+                            const isOpen = this.classList.toggle('open');
+                            document.querySelectorAll(`.download-item.folder-item[data-folder-item="${folderId}"]`).forEach(li => {
+                                li.style.display = isOpen ? 'flex' : 'none';
+                            });
+                        });
+                    });
                 }
             } catch (error) {
                 console.error('Error loading downloads:', error);

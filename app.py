@@ -211,12 +211,9 @@ async def process_download(query: str, download_type: str, download_id: str, for
 
         # Use subprocess to call spotdl CLI which handles everything properly
         import subprocess
-        import shlex
-        
         try:
             # Get total songs count from Spotify API
             total_songs = 1  # default for single track
-            
             if download_type == "playlist" or download_type == "album":
                 try:
                     import spotipy
@@ -226,9 +223,7 @@ async def process_download(query: str, download_type: str, download_id: str, for
                             client_secret=os.getenv("SPOTIPY_CLIENT_SECRET")
                         )
                     )
-                    
                     folder_name = query
-                    
                     if download_type == "playlist":
                         playlist_id = query.split("/playlist/")[-1].split("?")[0]
                         try:
@@ -238,7 +233,6 @@ async def process_download(query: str, download_type: str, download_id: str, for
                             logger.info(f"Fetched playlist: {folder_name} with {total_songs} songs")
                         except Exception as e:
                             logger.warning(f"Could not fetch playlist info: {e}")
-                    
                     elif download_type == "album":
                         album_id = query.split("/album/")[-1].split("?")[0]
                         try:
@@ -248,30 +242,21 @@ async def process_download(query: str, download_type: str, download_id: str, for
                             logger.info(f"Fetched album: {folder_name} with {total_songs} songs")
                         except Exception as e:
                             logger.warning(f"Could not fetch album info: {e}")
-                
                 except ImportError:
                     logger.warning("spotipy not installed, using query as folder name")
                 except Exception as e:
                     logger.warning(f"Error fetching info from Spotify: {e}")
-                
-                # Sanitize folder name - keep alphanumeric, spaces, dashes, underscores
                 folder_name = "".join(c if c.isalnum() or c in (' ', '-', '_') else '' for c in folder_name).strip()[:100]
-                
-                # If still empty, use a generic name
                 if not folder_name:
                     folder_name = f"{download_type}_{download_id[:8]}"
-                
                 output_subdir = DOWNLOAD_DIR / folder_name
                 output_subdir.mkdir(parents=True, exist_ok=True)
                 output_dir = str(output_subdir)
                 logger.info(f"Created folder: {folder_name}")
             else:
                 output_dir = str(DOWNLOAD_DIR)
-            
-            # Update total songs in status
             download_status["current"]["total"] = total_songs
-            
-            # Build spotdl command with longer timeout for playlists
+            # Build spotdl command
             cmd = [
                 "spotdl",
                 "download",
@@ -281,65 +266,50 @@ async def process_download(query: str, download_type: str, download_id: str, for
                 "--format",
                 cli_format
             ]
-            
             logger.info(f"Running command: {' '.join(cmd)}")
             logger.info(f"Output directory: {output_dir}")
             logger.info(f"Expected songs: {total_songs}")
-            
-            # Set timeout based on type: playlists need more time
-            timeout_seconds = 1800 if download_type == "playlist" else 600  # 30 min for playlists, 10 min for tracks
-            
-            # Run spotdl via subprocess and monitor progress
+            timeout_seconds = 1800 if download_type == "playlist" else 600
             music_extensions = {'.mp3', '.wav', '.flac', '.opus', '.m4a', '.aac'}
             output_path = Path(output_dir) if output_dir else None
-            
-            # Start the download process
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds
-            )
-            
-            # After download completes, update progress bar
-            download_status["current"]["progress"] = total_songs
-            download_status["current"]["songs_completed"] = total_songs
+            # Start the download process and stream output
+            import time
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            downloaded_count = 0
+            last_count = 0
+            start_time = time.time()
+            while True:
+                line = process.stdout.readline()
+                if not line and process.poll() is not None:
+                    break
+                # Heuristic: spotdl outputs 'Downloaded' or '100%|' per song
+                if line:
+                    if 'Downloaded' in line or '100%|' in line:
+                        downloaded_count += 1
+                # Always count files in output folder for more accuracy
+                if output_path and output_path.exists():
+                    files = [f for f in output_path.rglob('*') if f.is_file() and f.suffix.lower() in music_extensions]
+                    downloaded_count = max(downloaded_count, len(files))
+                # Update status every new song or every second
+                if downloaded_count != last_count or (time.time() - start_time) % 1 < 0.2:
+                    download_status["current"]["songs_completed"] = downloaded_count
+                    download_status["current"]["progress"] = downloaded_count
+                    last_count = downloaded_count
+                    await asyncio.sleep(0.1)
+            process.wait()
             await asyncio.sleep(0.5)
-            
-            if result.returncode == 0:
-                # Parse output to count downloaded songs
-                output_text = result.stdout + result.stderr
-                logger.info(f"Spotdl output: {output_text[:500]}")
-                
-                # Count actual files in output directory
-                if output_dir:
-                    try:
-                        if output_path and output_path.exists():
-                            # Count music files recursively
-                            files = [f for f in output_path.rglob('*') if f.is_file() and f.suffix.lower() in music_extensions]
-                            downloaded_count = len(files)
-                            
-                            if downloaded_count == 0:
-                                # Fallback: count any downloaded files
-                                files = [f for f in output_path.rglob('*') if f.is_file()]
-                                downloaded_count = len(files)
-                        else:
-                            downloaded_count = 1
-                    except Exception as e:
-                        logger.warning(f"Could not count files: {e}")
-                        downloaded_count = 1
-                else:
-                    downloaded_count = 1
-                
-                # Ensure at least 1
+            if process.returncode == 0:
+                # Final count
+                if output_path and output_path.exists():
+                    files = [f for f in output_path.rglob('*') if f.is_file() and f.suffix.lower() in music_extensions]
+                    downloaded_count = len(files)
                 if downloaded_count == 0:
                     downloaded_count = 1
-                
                 download_status["current"]["status"] = "completed"
-                download_status["current"]["progress"] = total_songs  # Show total songs as final progress
+                download_status["current"]["progress"] = total_songs
                 download_status["current"]["songs_completed"] = downloaded_count
                 download_status["current"]["total"] = total_songs
-                download_status["downloads"].append({
+                download_status["current"]["downloads"].append({
                     "id": download_id,
                     "query": query,
                     "type": download_type,
@@ -350,18 +320,18 @@ async def process_download(query: str, download_type: str, download_id: str, for
                 })
                 logger.info(f"Download completed: {query} ({downloaded_count} / {total_songs} songs)")
             else:
-                error_msg = result.stderr if result.stderr else "Unknown error"
+                error_msg = "Process failed"
                 logger.error(f"Spotdl returned error: {error_msg}")
                 raise Exception(f"Spotdl error: {error_msg}")
-                
         except subprocess.TimeoutExpired:
             timeout_msg = "Download timed out (playlist downloads can take 20+ minutes, please wait...)"
             logger.warning(timeout_msg)
-            # Mark as still processing instead of failed, so user knows it's still going
             download_status["current"]["status"] = "timeout"
             download_status["current"]["progress"] = 50
             raise Exception(timeout_msg)
         except Exception as download_error:
+            logger.error(f"Spotdl download error: {download_error}")
+            raise
             logger.error(f"Spotdl download error: {download_error}")
             raise
     
