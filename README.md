@@ -1,3 +1,6 @@
+
+![App Screenshot](screenshot.jpg)
+
 # SpotDL Web App
 
 A modern web interface for downloading Spotify songs, playlists, albums, and artists.
