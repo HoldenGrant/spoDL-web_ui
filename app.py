@@ -266,7 +266,9 @@ async def process_download(query: str, download_type: str, download_id: str, for
                 "--output",
                 output_dir,
                 "--format",
-                cli_format
+                cli_format,
+                "--force-update-metadata",
+                "--ytm-data"
             ]
             
             if include_lyrics:
