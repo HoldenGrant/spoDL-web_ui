@@ -4,6 +4,15 @@ echo SpotDL Web App Launcher
 echo ========================
 echo.
 
+REM Check if running as administrator
+net session >nul 2>&1
+if %errorlevel% == 0 (
+    echo Running with administrator privileges - Good!
+) else (
+    echo Note: Not running as administrator. Some features may require elevation.
+)
+echo.
+
 echo Checking Python installation...
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
@@ -11,87 +20,133 @@ if %errorlevel% neq 0 (
     echo Attempting to install Python automatically...
     echo.
     
+    echo Setting PowerShell execution policy...
+    powershell -Command "Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force" >nul 2>&1
+    
     echo Downloading Python installer...
-    powershell -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.7/python-3.11.7-amd64.exe' -OutFile 'python-installer.exe' } catch { Write-Host 'Download failed'; exit 1 }"
+    powershell -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Write-Host 'Downloading Python 3.11.7...'; Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.7/python-3.11.7-amd64.exe' -OutFile 'python-installer.exe' -UseBasicParsing; Write-Host 'Download completed successfully' } catch { Write-Host 'Download failed:' $_.Exception.Message; exit 1 }"
     
     if not exist python-installer.exe (
         echo Failed to download Python installer
-        echo Please manually install Python 3.8+ from https://python.org
+        echo.
+        echo Manual installation required:
+        echo 1. Go to https://python.org
+        echo 2. Download Python 3.8 or higher
+        echo 3. During installation, check "Add Python to PATH"
+        echo 4. Run this script again
         pause
         exit /b 1
     )
     
-    echo Installing Python...
-    start /wait python-installer.exe /quiet InstallAllUsers=0 PrependPath=1 Include_test=0
+    echo Installing Python ^(this may take a few minutes^)...
+    echo Please wait, do not close this window...
+    start /wait python-installer.exe /quiet InstallAllUsers=0 PrependPath=1 Include_test=0 Include_launcher=1 AssociateFiles=0
     
-    echo Cleaning up...
-    del python-installer.exe
+    echo Cleaning up installer...
+    if exist python-installer.exe del python-installer.exe
     
-    echo Updating PATH for current session...
-    set "PYTHON_PATH=%USERPROFILE%\AppData\Local\Programs\Python\Python311"
-    set "PYTHON_SCRIPTS=%USERPROFILE%\AppData\Local\Programs\Python\Python311\Scripts"
-    set "PATH=%PATH%;%PYTHON_PATH%;%PYTHON_SCRIPTS%"
+    echo Refreshing PATH...
+    call :RefreshEnv
     
-    echo Testing Python...
+    echo Testing Python installation...
     python --version >nul 2>&1
-    if %errorlevel% neq 0 (
-        echo Python installation completed but may need a restart
-        echo Please restart your command prompt and run this script again
+    if !errorlevel! neq 0 (
+        echo Python installation may not be complete
+        echo Please close this window, restart your computer, and try again
+        echo If the problem persists, install Python manually from python.org
         pause
         exit /b 1
     )
     
+    for /f "tokens=*" %%i in ('python --version 2^>^&1') do set PYTHON_VER=%%i
+    echo !PYTHON_VER!
     echo Python installed successfully!
+    echo.
+) else (
+    for /f "tokens=*" %%i in ('python --version 2^>^&1') do set PYTHON_VER=%%i
+    echo !PYTHON_VER!
+    echo Python is already installed
     echo.
 )
 
 
 echo Checking required Python libraries...
-python -m pip freeze > pip-freeze-tmp.txt
-findstr /i /c:"fastapi==" pip-freeze-tmp.txt >nul 2>&1
-if %errorlevel% neq 0 set NEEDS_INSTALL=1
-findstr /i /c:"uvicorn==" pip-freeze-tmp.txt >nul 2>&1
-if %errorlevel% neq 0 set NEEDS_INSTALL=1
-findstr /i /c:"spotdl==" pip-freeze-tmp.txt >nul 2>&1
-if %errorlevel% neq 0 set NEEDS_INSTALL=1
-findstr /i /c:"python-multipart==" pip-freeze-tmp.txt >nul 2>&1
-if %errorlevel% neq 0 set NEEDS_INSTALL=1
-del pip-freeze-tmp.txt
-if defined NEEDS_INSTALL (
-    echo Installing required Python libraries...
-    python -m pip install --upgrade pip
-    python -m pip install -r requirements.txt
-) else (
-    echo All required Python libraries are already installed.
+if not exist requirements.txt (
+    echo Error: requirements.txt file not found
+    echo Please make sure you are running this script from the correct directory
+    pause
+    exit /b 1
 )
+
+echo Upgrading pip...
+python -m pip install --upgrade pip --quiet
+
+echo Installing/checking dependencies...
+python -m pip install -r requirements.txt --quiet
+
+if %errorlevel% neq 0 (
+    echo Failed to install some dependencies
+    echo Trying with user installation...
+    python -m pip install -r requirements.txt --user --quiet
+    if %errorlevel% neq 0 (
+        echo Dependency installation failed
+        echo You may need to install dependencies manually:
+        echo python -m pip install -r requirements.txt
+        pause
+    )
+)
+
+echo Dependencies installed successfully
+echo.
 
 echo Setting Spotify credentials...
 if exist .env (
     echo Reading credentials from .env file...
-    for /f "usebackq tokens=1,2 delims==" %%A in (".env") do (
-        set "LINE=%%A"
-        if "!LINE!"=="SPOTIPY_CLIENT_ID" set "SPOTIPY_CLIENT_ID=%%B"
-        if "!LINE!"=="SPOTIPY_CLIENT_SECRET" set "SPOTIPY_CLIENT_SECRET=%%B"
+    for /f "usebackq delims=" %%i in (".env") do (
+        set "line=%%i"
+        for /f "tokens=1,2 delims==" %%A in ("!line!") do (
+            if "%%A"=="SPOTIPY_CLIENT_ID" set "SPOTIPY_CLIENT_ID=%%B"
+            if "%%A"=="SPOTIPY_CLIENT_SECRET" set "SPOTIPY_CLIENT_SECRET=%%B"
+        )
     )
 ) else (
-    echo No .env file found, prompting for credentials...
+    echo No .env file found, will prompt for credentials...
 )
 
 if not defined SPOTIPY_CLIENT_ID (
+    echo.
+    echo Spotify credentials are required to use this app.
+    echo Please visit: https://developer.spotify.com/dashboard/
+    echo 1. Create a new app
+    echo 2. Copy your Client ID and Client Secret
+    echo.
     set /p SPOTIPY_CLIENT_ID="Enter your Spotify Client ID: "
 )
 if not defined SPOTIPY_CLIENT_SECRET (
     set /p SPOTIPY_CLIENT_SECRET="Enter your Spotify Client Secret: "
 )
 
+REM Validate credentials are not empty
+if "!SPOTIPY_CLIENT_ID!"=="" (
+    echo Error: Client ID cannot be empty
+    pause
+    exit /b 1
+)
+if "!SPOTIPY_CLIENT_SECRET!"=="" (
+    echo Error: Client Secret cannot be empty  
+    pause
+    exit /b 1
+)
+
 REM Save credentials to .env file for future use
 if not exist .env (
-    echo SPOTIPY_CLIENT_ID=%SPOTIPY_CLIENT_ID%> .env
-    echo SPOTIPY_CLIENT_SECRET=%SPOTIPY_CLIENT_SECRET%>> .env
-    echo Credentials saved to .env file
+    echo SPOTIPY_CLIENT_ID=!SPOTIPY_CLIENT_ID!> .env
+    echo SPOTIPY_CLIENT_SECRET=!SPOTIPY_CLIENT_SECRET!>> .env
+    echo Credentials saved to .env file for future use
 )
 
 echo Credentials loaded successfully
+echo.
 
 echo Starting SpotDL Web App...
 echo Server will run at: http://localhost:8000
@@ -107,3 +162,17 @@ echo Debug: SPOTIPY_CLIENT_SECRET is set to: [HIDDEN]
 echo.
 
 python app.py
+goto :eof
+
+REM Function to refresh environment variables
+:RefreshEnv
+echo Refreshing environment variables...
+for /f "skip=2 tokens=2*" %%A in ('reg query "HKCU\Environment" /v PATH 2^>nul') do (
+    if not "%%B"=="" set "UserPath=%%B"
+)
+for /f "skip=2 tokens=2*" %%A in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v PATH 2^>nul') do (
+    if not "%%B"=="" set "SystemPath=%%B"
+)
+if defined UserPath set "PATH=%SystemPath%;%UserPath%"
+set "PATH=%PATH%;%USERPROFILE%\AppData\Local\Programs\Python\Python311;%USERPROFILE%\AppData\Local\Programs\Python\Python311\Scripts"
+goto :eof
