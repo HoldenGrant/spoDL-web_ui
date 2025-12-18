@@ -16,6 +16,10 @@ from datetime import datetime
 import logging
 from typing import Optional
 from spotdl import Spotdl, parse_query
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -40,6 +44,10 @@ DOWNLOAD_DIR.mkdir(exist_ok=True)
 spotdl = None
 client_id = os.getenv("SPOTIPY_CLIENT_ID")
 client_secret = os.getenv("SPOTIPY_CLIENT_SECRET")
+
+logger.info(f"Loading .env file...")
+logger.info(f"CLIENT_ID found: {'Yes' if client_id else 'No'}")
+logger.info(f"CLIENT_SECRET found: {'Yes' if client_secret else 'No'}")
 
 if client_id and client_secret:
     try:
