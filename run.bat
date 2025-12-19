@@ -98,6 +98,22 @@ if %errorlevel% neq 0 (
 echo Dependencies installed successfully
 echo.
 
+echo Checking FFmpeg installation for SpotDL...
+spotdl --download-ffmpeg >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Installing FFmpeg for SpotDL...
+    spotdl --download-ffmpeg
+    if %errorlevel% neq 0 (
+        echo Warning: FFmpeg installation may have failed
+        echo SpotDL might not work properly without FFmpeg
+    ) else (
+        echo FFmpeg installed successfully
+    )
+) else (
+    echo FFmpeg is already installed
+)
+echo.
+
 echo Setting Spotify credentials...
 if exist .env (
     echo Reading credentials from .env file...
